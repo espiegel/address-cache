@@ -19,7 +19,6 @@ import static org.junit.Assert.*;
 public class AddressCacheTest {
 
     public static final int THREE_SECONDS = 3000;
-    public static final int FIVE_SECONDS = 5000;
     public static final int SIX_SECONDS = 6000;
 
     // Unit tests for all methods of the AddressCache interface
@@ -38,7 +37,7 @@ public class AddressCacheTest {
     public void testAddressCacheOfferWithEviction() throws UnknownHostException, InterruptedException {
         AddressCache addressCache = new AddressCacheImpl();
 
-        boolean success = addressCache.offerWithExpiration(InetAddress.getByName("www.google.com"), FIVE_SECONDS);
+        boolean success = addressCache.offerWithExpiration(InetAddress.getByName("www.google.com"), THREE_SECONDS);
 
         assertTrue(success);
         assertEquals(1, addressCache.size());
