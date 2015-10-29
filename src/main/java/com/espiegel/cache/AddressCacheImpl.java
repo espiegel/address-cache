@@ -12,142 +12,169 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Created by Eidan on 10/28/2015.
+ *
+ * This implementation of Address Cache maintains an internal set, stack and queue.
+ * It also has an executor to schedule the removal of expired elements.
  */
 public class AddressCacheImpl implements AddressCache {
 
-    private static final int THREAD_POOL_SIZE = 2;
-    private static final int EVICTION_DELAY_IN_MILLIS = 5000;
-    private static final int QUEUE_INITIAL_CAPACITY = 10;
+	private static final int THREAD_POOL_SIZE = 2;
+	private static final int EVICTION_DELAY_IN_MILLIS = 5000;
+	private static final int QUEUE_INITIAL_CAPACITY = 10;
 
-    private final Logger logger = LoggerFactory.getLogger(AddressCacheImpl.class);
+	private final Logger logger = LoggerFactory.getLogger(AddressCacheImpl.class);
 
-    private Stack<InetAddress> stack = new Stack<>();
-    private Set<InetAddress> set = Collections.synchronizedSet(new HashSet<>());
-    private Queue<AddressWithExpiration> queue = new PriorityBlockingQueue<>(QUEUE_INITIAL_CAPACITY, (a1, a2) -> Long.compare(a1.expiration, a2.expiration));
-    private ScheduledExecutorService executor = new ScheduledThreadPoolExecutor(THREAD_POOL_SIZE);
-    private boolean isClosed = false;
+	private final Stack<InetAddress> stack = new Stack<>();
+	private final Set<InetAddress> set = Collections.synchronizedSet(new HashSet<>());
+	private final Queue<AddressWithExpiration> queue = new PriorityBlockingQueue<>(QUEUE_INITIAL_CAPACITY, (a1, a2) -> Long.compare(a1.expiration, a2.expiration));
+	private final ScheduledExecutorService executor = new ScheduledThreadPoolExecutor(THREAD_POOL_SIZE);
+	private boolean isClosed = false;
 
-    public AddressCacheImpl() {
-        executor.scheduleAtFixedRate(() -> {
-            while(true) {
-                AddressWithExpiration addressWithExpiration = queue.peek();
+	public AddressCacheImpl() {
+		executor.scheduleAtFixedRate(() -> {
+			AddressWithExpiration addressWithExpiration = queue.peek();
+			while(addressWithExpiration != null && addressWithExpiration.expiration < System.currentTimeMillis()) {
+				queue.poll();
+				remove(addressWithExpiration.address);
+				addressWithExpiration = queue.peek();
+			}
+		}, 0, EVICTION_DELAY_IN_MILLIS, TimeUnit.MILLISECONDS);
+	}
 
-                if(addressWithExpiration != null) {
-                    logger.info("Found expiration = {}, current time = {}", addressWithExpiration.expiration, System.currentTimeMillis());
-                    if(addressWithExpiration.expiration < System.currentTimeMillis()) {
-                        queue.poll();
-                        remove(addressWithExpiration.address);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }, 0, EVICTION_DELAY_IN_MILLIS, TimeUnit.MILLISECONDS);
-    }
+	// O(lgn) time
+	public boolean offerWithExpiration(InetAddress address, int expirationMillis) {
+		checkNotClosed();
 
-    public boolean offerWithExpiration(InetAddress address, int expirationMillis) {
-        checkNotClosed();
+		long timestamp = System.currentTimeMillis() + expirationMillis;
+		boolean success = queue.add(new AddressWithExpiration(address, timestamp));
+		if(success) {
+			offer(address);
+		}
+		logger.debug("inserted address {} with timestamp = {}", address, timestamp);
+		return success;
 
-        long timestamp = System.currentTimeMillis() + expirationMillis;
-        boolean success = queue.add(new AddressWithExpiration(address, timestamp));
-        if(success) {
-            offer(address);
-        }
-        logger.info("inserted address {} with timestamp = {}", address, timestamp);
-        return success;
+	}
 
-    }
+	// O(1) time
+	public boolean offer(InetAddress address) {
+		checkNotClosed();
 
-    public boolean offer(InetAddress address) {
-        checkNotClosed();
+		logger.debug("offering {}", address);
+		if(!set.contains(address)) {
+			stack.push(address);
+			return set.add(address);
+		} else {
+			stack.push(address);
+			return true;
+		}
+	}
 
-        logger.info("offering {}", address);
-        if(!set.contains(address)) {
-            stack.push(address);
-            return set.add(address);
-        } else {
-            stack.removeElement(address);
-            stack.push(address);
-            return true;
-        }
-    }
+	// O(1) time
+	public boolean contains(InetAddress address) {
+		checkNotClosed();
 
-    public boolean contains(InetAddress address) {
-        return set.contains(address);
-    }
+		return set.contains(address);
+	}
 
-    public boolean remove(InetAddress address) {
-        checkNotClosed();
+	// O(1) time
+	public boolean remove(InetAddress address) {
+		checkNotClosed();
 
-        logger.info("removing {}", address);
-        if(set.contains(address)) {
-            set.remove(address);
-            stack.remove(address);
-            return true;
-        } else {
-            return false;
-        }
-    }
+		logger.debug("removing {}", address);
+		if(set.contains(address)) {
+			set.remove(address);
+			return true;
+		} else {
+			return false;
+		}
+	}
 
-    public InetAddress peek() {
-        return isEmpty() ? null : stack.peek();
-    }
+	// O(n) time
+	public InetAddress peek() {
+		checkNotClosed();
 
-    public InetAddress remove() {
-        if(isEmpty()) {
-            return null;
-        } else {
-            InetAddress address = stack.pop();
-            logger.info("removing {}", address);
-            set.remove(address);
-            return address;
-        }
-    }
+		while(!isEmpty()) {
+			InetAddress address = stack.peek();
+			if(set.contains(address)) {
+				return address;
+			} else {
+				stack.pop();
+			}
+		}
+		return null;
+	}
 
-    public InetAddress take() throws InterruptedException {
-        while(true) {
-            checkNotClosed();
+	// O(n) time
+	public InetAddress remove() {
+		checkNotClosed();
 
-            if(!isEmpty()) {
-                InetAddress address = stack.pop();
-                logger.info("taking {}", address);
-                set.remove(address);
-                return address;
-            }
-        }
-    }
+		if(isEmpty()) {
+			return null;
+		} else {
+			InetAddress address = stack.pop();
+			if(set.contains(address)) {
+				logger.debug("removing {}", address);
+				set.remove(address);
+				return address;
+			} else {
+				return remove();
+			}
+		}
+	}
 
-    private void checkNotClosed() {
-        if(isClosed) {
-            throw new IllegalStateException("AddressCache is closed!");
-        }
-    }
+	// O(1) time if the cache is not empty. Otherwise this operation blocks until
+	// an element is inserted.
+	public InetAddress take() throws InterruptedException {
+		while(true) {
+			checkNotClosed();
 
-    public void close() {
-        if(!isClosed) {
-            set.clear();
-            stack.clear();
-            queue.clear();
-            executor.shutdownNow();
-            isClosed = true;
-        }
-    }
+			if(!isEmpty()) {
+				InetAddress address = stack.pop();
+				if(set.contains(address)) {
+					logger.debug("taking {}", address);
+					set.remove(address);
+					return address;
+				}
+			}
+		}
+	}
 
-    public int size() {
-        return set.size();
-    }
+	// O(n) time
+	public void close() {
+		if(!isClosed) {
+			logger.debug("Closing...");
+			set.clear();
+			queue.clear();
+			stack.clear();
 
-    public boolean isEmpty() {
-        return set.isEmpty();
-    }
+			executor.shutdownNow();
+			isClosed = true;
+		}
+	}
 
-    private class AddressWithExpiration {
-        InetAddress address;
-        long expiration;
+	// O(1) time
+	public int size() {
+		return set.size();
+	}
 
-        public AddressWithExpiration(InetAddress address, long expiration) {
-            this.address = address;
-            this.expiration = expiration;
-        }
-    }
+	// O(1) time
+	public boolean isEmpty() {
+		return set.isEmpty();
+	}
+
+	private void checkNotClosed() {
+		if(isClosed) {
+			throw new IllegalStateException("AddressCache is closed!");
+		}
+	}
+
+	private class AddressWithExpiration {
+		InetAddress address;
+		long expiration;
+
+		public AddressWithExpiration(InetAddress address, long expiration) {
+			this.address = address;
+			this.expiration = expiration;
+		}
+	}
 }
