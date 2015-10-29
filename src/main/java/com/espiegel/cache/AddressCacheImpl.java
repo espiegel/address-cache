@@ -80,8 +80,8 @@ public class AddressCacheImpl implements AddressCache {
 	public boolean remove(InetAddress address) {
 		checkNotClosed();
 
-		logger.debug("removing {}", address);
 		if(set.contains(address)) {
+			logger.debug("removing {}", address);
 			set.remove(address);
 			return true;
 		} else {
