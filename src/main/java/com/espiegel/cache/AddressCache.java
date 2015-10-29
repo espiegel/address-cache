@@ -7,45 +7,44 @@ package com.espiegel.cache;
 import java.net.InetAddress;
 
 /**
- *
  * This is an interface for a fictional {@link InetAddress} cache. The cache
  * maintains a "Last-In-First-Out" (LIFO) retrieve policy and a "First-In-
  * First-Out" (FIFO) eviction policy.
- *
+ * <p>
  * Methods such as {@link #peek()}, {@link #remove()} and {@link #take()}
  * retrieve the most recently added element and an internal cleanup task that
  * runs in periodic intervals removes the oldest elements from the cache.
- *
+ * <p>
  * The cleanup task must run every 5 seconds and the caching time of an element
  * must be configurable by the user.
- *
+ * <p>
  * The goal is to write the most beautiful and functionally correct code possible
- *  (including proof of correctness - i.e. tests).
- *
+ * (including proof of correctness - i.e. tests).
+ * <p>
  * Please mention the asymptotic complexity (Big-Oh) for each method of your
  * implementation.
- *
+ * <p>
  * offer() - Adds an element and returns true on success. An element can
  * exist only once in the cache and consecutive offers move the element to
  * the front of the list.
- *
+ * <p>
  * contains() - Returns true if an element exists in the cache
- *
+ * <p>
  * remove(InetAddress) - Removes the given address from the cache
- *
+ * <p>
  * peek() - Returns the most recently added element or null if the cache
  * is empty
- *
+ * <p>
  * remove() - Retrieves and removes the most recently added element or
  * null of the cache is empty
- *
+ * <p>
  * take() - Retrieves and removes the most recently added element, waiting
  * if necessary until an element becomes available
- *
+ * <p>
  * size() - Returns the size of the cache
- *
+ * <p>
  * isEmpty() - Returns true if the cache is empty
- *
+ * <p>
  * close() - Closes the cache and releases all resources
  */
 public interface AddressCache {
