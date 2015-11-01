@@ -15,23 +15,25 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * This implementation of AddressCache maintains an internal set, stack and queue in order to
  * achieve the following time complexity per operation:
- *
- * offerWithExpiration(InetAddress address, int expirationMillis) - O(lgn)
- * offer(InetAddress address) - O(1)
+ * <p>
+ * offer(InetAddress address) - O(n)
  * contains(InetAddress address) - O(1)
- * remove(InetAddress address) - O(1)
+ * remove(InetAddress address) - O(n)
  * peek() - O(n)
  * remove() - O(n)
- * take() - O(1)
+ * take() - O(n)
  * close() - O(n)
  * size() - O(1)
  * isEmpty() - O(1)
  */
 public class AddressCacheImpl implements AddressCache {
 
+    public static final int DEFAULT_EXPIRATION_TIME_IN_MILLIS = 10 * 1000;
     private static final int THREAD_POOL_SIZE = 2;
-    private static final int EVICTION_DELAY_IN_MILLIS = 5000;
+    private static final int EVICTION_DELAY_IN_MILLIS = 5 * 1000;
     private static final int QUEUE_INITIAL_CAPACITY = 10;
+
+    private static final Object WRITE_LOCK = new Object();
 
     private final Logger logger = LoggerFactory.getLogger(AddressCacheImpl.class);
 
@@ -43,39 +45,34 @@ public class AddressCacheImpl implements AddressCache {
 
     public AddressCacheImpl() {
         executor.scheduleAtFixedRate(() -> {
-            AddressWithExpiration addressWithExpiration = queue.peek();
-            while(addressWithExpiration != null && addressWithExpiration.expiration < System.currentTimeMillis()) {
-                queue.poll();
-                remove(addressWithExpiration.address);
-                addressWithExpiration = queue.peek();
+            synchronized(WRITE_LOCK) {
+                AddressWithExpiration addressWithExpiration = queue.peek();
+                while(addressWithExpiration != null && addressWithExpiration.expiration < System.currentTimeMillis()) {
+                    logger.info("evicting {} with timestamp {}", queue.peek().address, queue.peek().expiration);
+                    queue.poll();
+                    set.remove(addressWithExpiration.address);
+                    stack.remove(addressWithExpiration.address);
+                    addressWithExpiration = queue.peek();
+                }
             }
         }, 0, EVICTION_DELAY_IN_MILLIS, TimeUnit.MILLISECONDS);
     }
 
-    // O(lgn) time
-    public boolean offerWithExpiration(InetAddress address, int expirationMillis) {
-        checkNotClosed();
-
-        long timestamp = System.currentTimeMillis() + expirationMillis;
-        boolean success = queue.add(new AddressWithExpiration(address, timestamp));
-        if(success) {
-            offer(address);
-        }
-        logger.debug("inserted address {} with timestamp = {}", address, timestamp);
-        return success;
-
-    }
-
-    // O(1) time
+    // O(n) time
     public boolean offer(InetAddress address) {
-        checkNotClosed();
+        synchronized(WRITE_LOCK) {
+            checkNotClosed();
 
-        logger.debug("offering {}", address);
-        if(!set.contains(address)) {
+            if(set.contains(address)) {
+                stack.remove(address);
+                removeAddressFromQueue(address);
+            }
+
             stack.push(address);
-            return set.add(address);
-        } else {
-            stack.push(address);
+            set.add(address);
+            long timestamp = System.currentTimeMillis() + DEFAULT_EXPIRATION_TIME_IN_MILLIS;
+            queue.add(new AddressWithExpiration(address, timestamp));
+            logger.debug("offering {} with timestamp {}", address, timestamp);
             return true;
         }
     }
@@ -87,63 +84,63 @@ public class AddressCacheImpl implements AddressCache {
         return set.contains(address);
     }
 
-    // O(1) time
+    // O(n) time
     public boolean remove(InetAddress address) {
-        checkNotClosed();
+        synchronized(WRITE_LOCK) {
+            checkNotClosed();
 
-        if(set.contains(address)) {
-            logger.debug("removing {}", address);
-            set.remove(address);
-            return true;
-        } else {
-            return false;
+            if(set.contains(address)) {
+                logger.debug("removing {}", address);
+                set.remove(address);
+                stack.remove(address);
+                removeAddressFromQueue(address);
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
-    // O(n) time
+    // O(1) time
     public InetAddress peek() {
         checkNotClosed();
 
-        while(!isEmpty()) {
-            InetAddress address = stack.peek();
-            if(set.contains(address)) {
-                return address;
-            } else {
-                stack.pop();
-            }
+        if(!isEmpty()) {
+            return stack.peek();
+        } else {
+            return null;
         }
-        return null;
     }
 
     // O(n) time
     public InetAddress remove() {
-        checkNotClosed();
+        synchronized(WRITE_LOCK) {
+            checkNotClosed();
 
-        if(isEmpty()) {
-            return null;
-        } else {
-            InetAddress address = stack.pop();
-            if(set.contains(address)) {
+            if(!isEmpty()) {
+                InetAddress address = stack.pop();
                 logger.debug("removing {}", address);
                 set.remove(address);
+                removeAddressFromQueue(address);
                 return address;
             } else {
-                return remove();
+                return null;
             }
         }
     }
 
-    // O(1) time if the cache is not empty. Otherwise this operation blocks until
+    // O(n) time if the cache is not empty. Otherwise this operation blocks until
     // an element is inserted.
     public InetAddress take() throws InterruptedException {
         while(true) {
             checkNotClosed();
 
-            if(!isEmpty()) {
-                InetAddress address = stack.pop();
-                if(set.contains(address)) {
+            synchronized(WRITE_LOCK) {
+                if(!isEmpty()) {
+                    InetAddress address = stack.pop();
                     logger.debug("taking {}", address);
                     set.remove(address);
+                    removeAddressFromQueue(address);
                     return address;
                 }
             }
@@ -153,13 +150,15 @@ public class AddressCacheImpl implements AddressCache {
     // O(n) time
     public void close() {
         if(!isClosed) {
-            logger.debug("Closing...");
-            set.clear();
-            queue.clear();
-            stack.clear();
+            synchronized(WRITE_LOCK) {
+                logger.debug("Closing...");
+                set.clear();
+                queue.clear();
+                stack.clear();
 
-            executor.shutdownNow();
-            isClosed = true;
+                executor.shutdownNow();
+                isClosed = true;
+            }
         }
     }
 
@@ -177,6 +176,10 @@ public class AddressCacheImpl implements AddressCache {
         if(isClosed) {
             throw new IllegalStateException("AddressCache is closed!");
         }
+    }
+
+    private void removeAddressFromQueue(InetAddress address) {
+        queue.removeIf(a -> a.address.equals(address));
     }
 
     private class AddressWithExpiration {

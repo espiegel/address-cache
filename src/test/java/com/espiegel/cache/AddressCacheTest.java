@@ -18,9 +18,6 @@ import static org.junit.Assert.*;
  */
 public class AddressCacheTest {
 
-    public static final int THREE_SECONDS = 3000;
-    public static final int SIX_SECONDS = 6000;
-
     // Unit tests for all methods of the AddressCache interface
     @Test
     public void testAddressCacheOffer() {
@@ -34,24 +31,8 @@ public class AddressCacheTest {
     }
 
     @Test
-    public void testAddressCacheOfferWithEviction() throws UnknownHostException, InterruptedException {
-        AddressCache addressCache = new AddressCacheImpl();
-
-        boolean success = addressCache.offerWithExpiration(InetAddress.getByName("www.google.com"), THREE_SECONDS);
-
-        assertTrue(success);
-        assertEquals(1, addressCache.size());
-        assertFalse(addressCache.isEmpty());
-
-        Thread.sleep(SIX_SECONDS);
-
-        assertEquals(0, addressCache.size());
-        assertTrue(addressCache.isEmpty());
-    }
-
-    @Test
     public void testAddressCacheContains() throws UnknownHostException {
-        AddressCache addressCache = createAddressCacheWithEviction(true);
+        AddressCache addressCache = createAddressCache();
 
         assertTrue(addressCache.contains(InetAddress.getByName("www.google.com")));
         assertFalse(addressCache.contains(InetAddress.getByName("www.yahoo.com")));
@@ -70,14 +51,12 @@ public class AddressCacheTest {
 
     @Test
     public void testPeek() throws UnknownHostException, InterruptedException {
-        AddressCache addressCache = createAddressCacheWithEviction(false);
+        AddressCache addressCache = createAddressCache();
 
-        assertEquals(InetAddress.getByName("www.github.com"), addressCache.peek());
+        assertEquals(InetAddress.getByName("www.twitter.com"), addressCache.peek());
 
-        Thread.sleep(SIX_SECONDS);
-        assertEquals(InetAddress.getByName("www.handy.com"), addressCache.peek());
+        Thread.sleep(15000);
 
-        Thread.sleep(SIX_SECONDS);
         assertEquals(null, addressCache.peek());
     }
 
@@ -109,7 +88,7 @@ public class AddressCacheTest {
 
         new Thread(() -> {
             try {
-                Thread.sleep(THREE_SECONDS);
+                Thread.sleep(1000);
                 addressCache.offer(InetAddress.getByName("9gag.com"));
             } catch(UnknownHostException | InterruptedException e) {
                 e.printStackTrace();
@@ -123,14 +102,9 @@ public class AddressCacheTest {
 
     @Test(expected = IllegalStateException.class)
     public void testAddressCacheClose() throws UnknownHostException, InterruptedException {
-        AddressCache addressCache = createAddressCacheWithEviction(true);
+        AddressCache addressCache = createAddressCache();
 
         addressCache.close();
-        assertEquals(0, addressCache.size());
-        assertTrue(addressCache.isEmpty());
-
-        Thread.sleep(SIX_SECONDS);
-
         assertEquals(0, addressCache.size());
         assertTrue(addressCache.isEmpty());
 
@@ -173,27 +147,6 @@ public class AddressCacheTest {
     }
 
     @Test
-    public void testAddressCacheMultipleEviction() throws UnknownHostException, InterruptedException {
-        AddressCache addressCache = createAddressCacheWithEviction(true);
-
-        List<String> addresses = Arrays.asList("www.google.com", "www.handy.com", "www.github.com");
-        for(int i = 0; i < addresses.size(); i++) {
-            boolean success = addressCache.offerWithExpiration(InetAddress.getByName(addresses.get(i)), THREE_SECONDS * (i + 1));
-            assertTrue(success);
-        }
-
-        assertEquals(addresses.size(), addressCache.size());
-        assertFalse(addressCache.isEmpty());
-
-        Thread.sleep(SIX_SECONDS);
-        assertEquals(2, addressCache.size());
-
-        Thread.sleep(SIX_SECONDS);
-        assertEquals(0, addressCache.size());
-        assertTrue(addressCache.isEmpty());
-    }
-
-    @Test
     public void testConsecutiveOffer() throws UnknownHostException {
         AddressCache addressCache = createAddressCache();
 
@@ -214,13 +167,14 @@ public class AddressCacheTest {
 
     @Test
     public void testConcurrency() throws UnknownHostException, InterruptedException {
-        AddressCache addressCache = createAddressCache();
+        AddressCache addressCache = new AddressCacheImpl();
 
-        List<String> addresses = Arrays.asList("www.cnn.com", "www.nbc.com", "www.yahoo.com", "www.espn.com", "www.wikipedia.org");
+        List<String> addresses = Arrays.asList("www.google.com", "www.github.com", "www.reddit.com", "www.cnn.com",
+            "www.nbc.com", "www.yahoo.com", "www.espn.com", "www.wikipedia.org");
         List<Thread> threads = new ArrayList<>();
 
         addresses.forEach(a -> {
-            threads.add(new Thread(Utils.unchecked(() -> addressCache.offerWithExpiration(InetAddress.getByName(a), THREE_SECONDS))));
+            threads.add(new Thread(Utils.unchecked(() -> addressCache.offer(InetAddress.getByName(a)))));
         });
 
         threads.add(new Thread(Utils.unchecked(() -> addressCache.remove(InetAddress.getByName("www.google.com")))));
@@ -229,15 +183,15 @@ public class AddressCacheTest {
 
         threads.forEach(Thread::start);
 
-        Thread.sleep(1000);
+        Thread.sleep(2000);
 
         assertFalse(addressCache.isEmpty());
-        assertEquals(7, addressCache.size());
+        assertEquals(5, addressCache.size());
 
-        Thread.sleep(10000);
+        Thread.sleep(15000);
 
-        assertFalse(addressCache.isEmpty());
-        assertEquals(2, addressCache.size());
+        assertTrue(addressCache.isEmpty());
+        assertEquals(0, addressCache.size());
     }
 
     @Test
@@ -245,13 +199,14 @@ public class AddressCacheTest {
         AddressCache addressCache = createAddressCache();
 
         List<Thread> threads = new ArrayList<>();
-        List<String> addresses = Arrays.asList("www.cnn.com", "www.nbc.com", "www.yahoo.com", "www.espn.com", "www.wikipedia.org");
+        List<String> addresses = Arrays.asList("www.google.com", "www.github.com", "www.reddit.com", "www.cnn.com",
+            "www.nbc.com", "www.yahoo.com", "www.espn.com", "www.wikipedia.org");
 
         Random random = new Random();
         IntStream.range(0, 100).forEach(i -> {
             try {
                 InetAddress address = InetAddress.getByName(addresses.get(random.nextInt(addresses.size())));
-                threads.add(new Thread(() -> addressCache.offerWithExpiration(address, random.nextInt(10000))));
+                threads.add(new Thread(() -> addressCache.offer(address)));
             } catch(UnknownHostException e) {
                 e.printStackTrace();
                 fail();
@@ -259,10 +214,6 @@ public class AddressCacheTest {
         });
 
         threads.forEach(Thread::start);
-
-        while(!addressCache.isEmpty()) {
-            addressCache.remove();
-        }
 
         Thread.sleep(15000);
 
@@ -275,17 +226,6 @@ public class AddressCacheTest {
         List<String> addresses = Arrays.asList("www.google.com", "www.handy.com", "www.github.com", "www.reddit.com", "www.twitter.com");
         for(String address : addresses) {
             boolean success = addressCache.offer(InetAddress.getByName(address));
-            assertTrue(success);
-        }
-        return addressCache;
-    }
-
-    private AddressCache createAddressCacheWithEviction(boolean isEvictionAscending) throws UnknownHostException {
-        AddressCache addressCache = new AddressCacheImpl();
-        List<String> addresses = Arrays.asList("www.google.com", "www.handy.com", "www.github.com");
-        for(int i = 0; i < addresses.size(); i++) {
-            boolean success = addressCache.offerWithExpiration(InetAddress.getByName(addresses.get(i)),
-                THREE_SECONDS * (isEvictionAscending ? (i + 1) : (addresses.size() - i)));
             assertTrue(success);
         }
         return addressCache;

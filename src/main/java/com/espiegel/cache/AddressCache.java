@@ -50,11 +50,6 @@ import java.net.InetAddress;
 public interface AddressCache {
 
     /**
-     * Adds the given {@link InetAddress} and will evict it within expirationMillis milliseconds. Returns {@code true} on success.
-     */
-    public boolean offerWithExpiration(InetAddress address, int expirationMillis);
-
-    /**
      * Adds the given {@link InetAddress} and returns {@code true} on success.
      */
     public boolean offer(InetAddress address);
