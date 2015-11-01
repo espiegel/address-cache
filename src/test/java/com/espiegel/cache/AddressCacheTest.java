@@ -169,8 +169,12 @@ public class AddressCacheTest {
     public void testConcurrency() throws UnknownHostException, InterruptedException {
         AddressCache addressCache = new AddressCacheImpl();
 
-        List<String> addresses = Arrays.asList("www.google.com", "www.github.com", "www.reddit.com", "www.cnn.com",
-            "www.nbc.com", "www.yahoo.com", "www.espn.com", "www.wikipedia.org");
+        addressCache.offer(InetAddress.getByName("www.google.com"));
+        addressCache.offer(InetAddress.getByName("www.github.com"));
+        addressCache.offer(InetAddress.getByName("www.reddit.com"));
+
+        List<String> addresses = Arrays.asList("www.cnn.com", "www.nbc.com", "www.yahoo.com",
+            "www.espn.com", "www.wikipedia.org");
         List<Thread> threads = new ArrayList<>();
 
         addresses.forEach(a -> {
