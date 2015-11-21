@@ -1,0 +1,67 @@
+import java.io.*;
+import java.util.*;
+
+/*
+ * To execute Java, please define "static void main" on a class
+ * named Solution.
+ *
+ * If you need more classes, simply define them inline.
+ */
+
+class Solution {
+  public static void main(String[] args) {
+    //System.out.println(minutesToBarber(10, 4, Arrays.asList(3, 5, 7, 7)));
+
+    System.out.println(minutesToBarber(2, 2, Arrays.asList(1,2)));
+    System.out.println(minutesToBarber(2, 2, Arrays.asList(2,2)));
+  }
+
+// T * I
+// lg(max(T)) * I
+  public static int minutesToBarber(int n, int i, List<Integer> minutes) {
+
+    if(i>n) {
+      return 0;
+    }
+
+    // 10
+    // 3, 5, 7, 7
+    // 4, 2, 2, 2
+
+    // fastest barber time * n/i
+
+    int time = 0;
+    int customers = 0;
+
+    while(customers <= n) {
+      for(int b : minutes) {
+        if(time % b == 0) {
+          customers++;
+
+          if(customers == n+1) {
+            return time;
+          }
+        }
+      }
+      time++;
+    }
+
+    return time;
+  }
+}
+
+
+/*
+Your previous Plain Text content is preserved below:
+
+Problem: Barbers
+
+N Customers
+I Barbers
+m(0), m(1), ... m(i-1) minutes
+
+upper bound:
+max(m(0), m(1), ... , m(i-1)) * (N/I)
+
+
+ */
